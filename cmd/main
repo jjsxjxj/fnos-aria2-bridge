@@ -1,0 +1,160 @@
+#!/bin/bash
+#
+# 下载中心接入Aria2 — 生命周期管理
+# start:  后台启动 bridge.py（纯标准库，无 pip 依赖），写 PID，等端口就绪
+# stop:   TERM → 超时 KILL
+# status: 运行中 0 / 未运行 3
+#
+set -uo pipefail
+
+APPDEST="${TRIM_APPDEST:-/var/apps/aria2bridge}"
+PKGETC="${TRIM_PKGETC:-/var/apps/aria2bridge/etc}"
+PKGVAR="${TRIM_PKGVAR:-/var/apps/aria2bridge/var}"
+LOG_FILE="${PKGVAR}/main.log"
+PID_FILE="${PKGVAR}/bridge.pid"
+CONFIG="${PKGETC}/config.json"
+PORT_DEFAULT=6800
+
+# fnOS 将 app.tgz 解压到应用根目录；兼容 app/ 子目录布局
+if [ -f "${APPDEST}/bridge.py" ]; then
+    APP_PY="${APPDEST}/bridge.py"
+elif [ -f "${APPDEST}/app/bridge.py" ]; then
+    APP_PY="${APPDEST}/app/bridge.py"
+else
+    APP_PY=""
+fi
+
+log_msg() { mkdir -p "${PKGVAR}"
+    # main.log 超 5MB 滚动为 .old,只保留一代
+    if [ -f "${LOG_FILE}" ] && [ "$(stat -c%s "${LOG_FILE}" 2>/dev/null || echo 0)" -gt 5242880 ]; then
+        mv -f "${LOG_FILE}" "${LOG_FILE}.old"
+    fi
+    echo "$(date '+%Y-%m-%d %H:%M:%S') - $1" >> "${LOG_FILE}"; }
+
+find_python312() {
+    local cand py
+    for cand in \
+        /var/apps/python312/target/bin/python3.12 \
+        /usr/local/bin/python3.12 \
+        python3.12 \
+        python3
+    do
+        if command -v "$cand" >/dev/null 2>&1; then
+            py="$(command -v "$cand")"
+            if "$py" -c 'import sys; assert sys.version_info >= (3,8)' >/dev/null 2>&1; then
+                printf '%s' "$py"
+                return 0
+            fi
+        fi
+    done
+    return 1
+}
+
+config_port() {
+    if [ -r "${CONFIG}" ] && [ -n "${PY_CACHED:-}" ]; then
+        "${PY_CACHED}" -c "import json,sys;print(json.load(open(sys.argv[1])).get('port',${PORT_DEFAULT}))" "${CONFIG}" 2>/dev/null || echo "${PORT_DEFAULT}"
+    else
+        echo "${PORT_DEFAULT}"
+    fi
+}
+
+check_process() { kill -0 "$1" 2>/dev/null; }
+
+status() {
+    if [ -f "${PID_FILE}" ]; then
+        local pid
+        pid=$(head -n 1 "${PID_FILE}" | tr -d '[:space:]')
+        if [ -n "$pid" ] && check_process "$pid"; then
+            return 0
+        fi
+        rm -f "${PID_FILE}"
+    fi
+    return 1
+}
+
+start_process() {
+    if status; then return 0; fi
+    mkdir -p "${PKGVAR}" "${PKGETC}"
+
+    local PY
+    PY="$(find_python312)" || {
+        echo "[aria2bridge] 未找到 python3，请确认已安装「Python 3.12」开发工具" > "${TRIM_TEMP_LOGFILE:-/dev/null}" 2>&1 || true
+        log_msg "FATAL: python not found"
+        return 1
+    }
+    PY_CACHED="$PY"
+    if [ -z "${APP_PY}" ]; then
+        echo "[aria2bridge] 缺少应用文件 bridge.py（已检查 ${APPDEST}/ 与 ${APPDEST}/app/）" > "${TRIM_TEMP_LOGFILE:-/dev/null}" 2>&1 || true
+        log_msg "FATAL: bridge.py not found under ${APPDEST}"
+        ls -la "${APPDEST}" >> "${LOG_FILE}" 2>&1 || true
+        return 1
+    fi
+    if [ ! -r "${CONFIG}" ]; then
+        echo "[aria2bridge] 缺少配置文件 ${CONFIG}，请在应用设置中重新配置" > "${TRIM_TEMP_LOGFILE:-/dev/null}" 2>&1 || true
+        log_msg "FATAL: config not found: ${CONFIG}"
+        return 1
+    fi
+
+    local TRIM_BIN="${APPDEST}/trim-cli-linux-x64"
+    [ -f "${TRIM_BIN}" ] || TRIM_BIN="${APPDEST}/app/trim-cli-linux-x64"
+    chmod +x "${TRIM_BIN}" 2>/dev/null || true
+
+    local PORT
+    PORT="$(config_port)"
+    log_msg "Starting aria2bridge on port ${PORT} with ${PY}"
+    # 桥接日志由 bridge.py 自己写入 bridge.log；这里只接 stdout/stderr（含崩溃堆栈）到 main.log，避免重复
+    nohup "$PY" "${APP_PY}" --config "${CONFIG}" --var "${PKGVAR}" --trim-cli "${TRIM_BIN}" >> "${LOG_FILE}" 2>&1 &
+    local pid=$!
+    printf "%s" "$pid" > "${PID_FILE}"
+
+    local i
+    for i in $(seq 1 20); do
+        if (exec 3<>/dev/tcp/127.0.0.1/"$PORT") 2>/dev/null; then
+            exec 3>&- 3<&- 2>/dev/null
+            log_msg "aria2bridge ready, pid=${pid}"
+            return 0
+        fi
+        if ! check_process "$pid"; then
+            rm -f "${PID_FILE}"
+            echo "[aria2bridge] 服务进程启动失败，详见 ${PKGVAR}/bridge.log" > "${TRIM_TEMP_LOGFILE:-/dev/null}" 2>&1 || true
+            log_msg "process exited early"
+            return 1
+        fi
+        sleep 1
+    done
+    log_msg "WARN: port ${PORT} not ready in 20s (pid=${pid} alive)"
+    return 0
+}
+
+stop_process() {
+    log_msg "Stopping aria2bridge ..."
+    if [ -r "${PID_FILE}" ]; then
+        local pid
+        pid=$(head -n 1 "${PID_FILE}" | tr -d '[:space:]')
+        if [ -n "$pid" ] && check_process "$pid"; then
+            kill -TERM "$pid" 2>/dev/null || true
+            local count=0
+            while check_process "$pid" && [ $count -lt 10 ]; do
+                sleep 1
+                count=$((count + 1))
+            done
+            if check_process "$pid"; then
+                kill -KILL "$pid" 2>/dev/null || true
+                sleep 1
+            fi
+        fi
+        rm -f "${PID_FILE}"
+    fi
+    pkill -f "@appcenter/aria2bridge.*bridge\.py" 2>/dev/null || true
+    log_msg "aria2bridge stopped"
+    return 0
+}
+
+case "$1" in
+start)   start_process ;;
+stop)    stop_process ;;
+status)  if status; then exit 0; else exit 3; fi ;;
+restart) stop_process; start_process ;;
+log)     tail -n "${2:-100}" "${LOG_FILE}" 2>/dev/null; tail -n "${2:-100}" "${PKGVAR}/bridge.log" 2>/dev/null ;;
+*)       exit 1 ;;
+esac

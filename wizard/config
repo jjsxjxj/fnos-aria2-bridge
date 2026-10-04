@@ -1,0 +1,41 @@
+[
+    {
+        "stepTitle": "参数设置",
+        "items": [
+            {
+                "type": "tips",
+                "helpText": "修改后应用会自动重启生效。<b>留空的项保持原值不变。</b>"
+            },
+            {
+                "type": "text",
+                "field": "wizard_fnos_user",
+                "label": "飞牛账号",
+                "initValue": ""
+            },
+            {
+                "type": "password",
+                "field": "wizard_fnos_password",
+                "label": "飞牛密码（留空 = 不变）",
+                "initValue": ""
+            },
+            {
+                "type": "text",
+                "field": "wizard_port",
+                "label": "监听端口（留空 = 不变）",
+                "initValue": ""
+            },
+            {
+                "type": "text",
+                "field": "wizard_secret",
+                "label": "Aria2 RPC 密钥（留空 = 不变）",
+                "initValue": ""
+            },
+            {
+                "type": "text",
+                "field": "wizard_savedir",
+                "label": "默认保存目录（留空 = 使用下载中心默认）",
+                "initValue": ""
+            }
+        ]
+    }
+]

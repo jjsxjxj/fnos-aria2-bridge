@@ -1,0 +1,9 @@
+#!/bin/bash
+#
+# 下载中心接入Aria2 — 升级后回调：配置在 TRIM_PKGETC 中持久保存，无需迁移。
+#
+set -uo pipefail
+PKGVAR="${TRIM_PKGVAR:-/var/apps/aria2bridge/var}"
+mkdir -p "${PKGVAR}"
+echo "$(date '+%Y-%m-%d %H:%M:%S') - upgraded" >> "${PKGVAR}/main.log"
+exit 0

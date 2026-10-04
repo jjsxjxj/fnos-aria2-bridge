@@ -1,0 +1,30 @@
+#!/bin/bash
+#
+# 下载中心接入Aria2 — 应用设置变更回调：用设置向导的新值更新 config.json
+# 留空的字段 = 保持原值不变
+#
+set -uo pipefail
+PKGETC="${TRIM_PKGETC:-/var/apps/aria2bridge/etc}"
+CONFIG="${PKGETC}/config.json"
+[ -r "${CONFIG}" ] || exit 0
+
+PY=""
+for cand in /var/apps/python312/target/bin/python3.12 /usr/local/bin/python3.12 python3.12 python3; do
+    if command -v "$cand" >/dev/null 2>&1; then PY="$(command -v "$cand")"; break; fi
+done
+[ -n "$PY" ] || exit 0
+
+"$PY" - "$CONFIG" "${wizard_fnos_user:-}" "${wizard_fnos_password:-}" "${wizard_secret:-}" "${wizard_savedir:-}" "${wizard_port:-}" <<'PYEOF'
+import json, os, sys
+path, user, pwd, secret, savedir, port = sys.argv[1:7]
+cfg = json.load(open(path, encoding="utf-8"))
+if user: cfg["fnos_user"] = user
+if pwd: cfg["fnos_password"] = pwd
+if secret: cfg["secret"] = secret
+if savedir: cfg["default_save_dir"] = savedir
+if str(port).isdigit(): cfg["port"] = int(port)
+with open(path, "w", encoding="utf-8") as f:
+    json.dump(cfg, f, ensure_ascii=False, indent=2)
+os.chmod(path, 0o600)
+PYEOF
+exit 0

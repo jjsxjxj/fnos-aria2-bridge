@@ -1,0 +1,19 @@
+# 构建产物
+*.fpk
+*.tpk
+
+# 测试运行时产物
+test/test_var/
+test/test_config.json
+test/mock_trimcli.cmd
+test/mock_trimcli.sh
+test/mock_ctl.json
+test/mock_adduri_count.txt
+
+# 开发临时文件
+icon_preview.png
+served_icon.png
+__pycache__/
+*.pyc
+*.log
+.DS_Store

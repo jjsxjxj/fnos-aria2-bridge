@@ -1,0 +1,69 @@
+[
+    {
+        "stepTitle": "接入配置",
+        "items": [
+            {
+                "type": "tips",
+                "helpText": "<b>下载中心接入Aria2</b> — 把飞牛「下载中心」变成一个标准 Aria2 下载器，任何支持 Aria2 的软件都能直接推送任务。<br><br><b>接入方法（通用）：</b>在任意软件的「Aria2 / RPC 设置」里填：<br>· 主机：飞牛主机 IP<br>· 端口：6800（或下方自定义端口）<br>· 密钥：下方设置的 Secret<br><br>打开桌面图标可随时查看接入参数、自检连通性和最近推送记录。"
+            },
+            {
+                "type": "text",
+                "field": "wizard_fnos_user",
+                "label": "飞牛账号（用于调用下载中心，建议管理员）",
+                "initValue": "admin",
+                "rules": [
+                    {
+                        "required": true,
+                        "message": "请输入飞牛账号"
+                    }
+                ]
+            },
+            {
+                "type": "password",
+                "field": "wizard_fnos_password",
+                "label": "飞牛密码（仅保存在本机应用配置目录）",
+                "initValue": "",
+                "rules": [
+                    {
+                        "required": true,
+                        "message": "请输入飞牛密码"
+                    }
+                ]
+            },
+            {
+                "type": "text",
+                "field": "wizard_port",
+                "label": "桥接监听端口（默认 6800，一般不用改）",
+                "initValue": "6800",
+                "rules": [
+                    {
+                        "required": true,
+                        "message": "请输入监听端口"
+                    },
+                    {
+                        "pattern": "^([1-9][0-9]{1,4})$",
+                        "message": "端口必须是数字"
+                    }
+                ]
+            },
+            {
+                "type": "text",
+                "field": "wizard_secret",
+                "label": "Aria2 RPC 密钥（Secret，填写到 DBO 的 Aria2 设置里）",
+                "initValue": "dfc4e90c7853a46668cae6f3",
+                "rules": [
+                    {
+                        "required": true,
+                        "message": "请设置 Aria2 密钥"
+                    }
+                ]
+            },
+            {
+                "type": "text",
+                "field": "wizard_savedir",
+                "label": "默认保存目录（留空 = 使用「下载中心」默认目录；仅当 DBO 推送目录非 /vol 开头时使用）",
+                "initValue": ""
+            }
+        ]
+    }
+]

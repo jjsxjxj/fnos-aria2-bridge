@@ -1,0 +1,33 @@
+[
+    {
+        "stepTitle": "确认卸载",
+        "items": [
+            {
+                "type": "tips",
+                "helpText": "卸载后 DBO 将无法再通过 Aria2 端口推送任务到飞牛「下载中心」。配置（含飞牛账号密码）和推送日志保存在独立数据目录中，可保留或删除。"
+            },
+            {
+                "type": "radio",
+                "field": "wizard_delete_data",
+                "label": "是否删除配置与日志？",
+                "initValue": "no",
+                "options": [
+                    {
+                        "label": "保留数据（推荐 — 下次安装可继续使用）",
+                        "value": "no"
+                    },
+                    {
+                        "label": "完全删除（清除配置与全部日志）",
+                        "value": "yes"
+                    }
+                ],
+                "rules": [
+                    {
+                        "required": true,
+                        "message": "请选择是否删除本地数据"
+                    }
+                ]
+            }
+        ]
+    }
+]

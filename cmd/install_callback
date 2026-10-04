@@ -1,0 +1,73 @@
+#!/bin/bash
+#
+# 下载中心接入Aria2 — 安装后回调：把安装向导参数写入 config.json
+#   wizard_fnos_user     飞牛账号（用于调用下载中心）
+#   wizard_fnos_password 飞牛密码
+#   wizard_secret        Aria2 RPC 密钥
+#   wizard_savedir       默认保存目录（空 = 使用下载中心默认目录）
+# 密码只写入 config.json（权限 600），绝不写日志。
+#
+set -uo pipefail
+
+APPNAME=aria2bridge
+PKGETC="${TRIM_PKGETC:-/var/apps/aria2bridge/etc}"
+PKGVAR="${TRIM_PKGVAR:-/var/apps/aria2bridge/var}"
+CONFIG="${PKGETC}/config.json"
+mkdir -p "${PKGETC}" "${PKGVAR}"
+
+FNOS_USER="${wizard_fnos_user:-admin}"
+FNOS_PASSWORD="${wizard_fnos_password:-}"
+SECRET="${wizard_secret:-}"
+SAVEDIR="${wizard_savedir:-}"
+PORT="${wizard_port:-6800}"
+
+write_config() {
+    python3 - "$CONFIG" "$FNOS_USER" "$FNOS_PASSWORD" "$SECRET" "$SAVEDIR" "$PORT" <<'PYEOF'
+import json, os, sys
+path, user, pwd, secret, savedir, port = sys.argv[1:7]
+cfg = {
+    "port": int(port) if str(port).isdigit() else 6800,
+    "secret": secret,
+    "fnos_user": user,
+    "fnos_password": pwd,
+    "fnos_host": "127.0.0.1",
+    "fnos_port": 5666,
+    "default_save_dir": savedir,
+    "dir_map": [],
+}
+with open(path, "w", encoding="utf-8") as f:
+    json.dump(cfg, f, ensure_ascii=False, indent=2)
+os.chmod(path, 0o600)
+PYEOF
+}
+
+PY=""
+for cand in /var/apps/python312/target/bin/python3.12 /usr/local/bin/python3.12 python3.12 python3; do
+    if command -v "$cand" >/dev/null 2>&1; then PY="$(command -v "$cand")"; break; fi
+done
+
+if [ -n "$PY" ]; then
+    write_config
+else
+    # 兜底：无 python 时用 shell 写（密码含特殊字符时可能不准，正常路径不会走到）
+    cat > "${CONFIG}" <<EOF
+{
+  "port": ${PORT},
+  "secret": "${SECRET}",
+  "fnos_user": "${FNOS_USER}",
+  "fnos_password": "${FNOS_PASSWORD}",
+  "fnos_host": "127.0.0.1",
+  "fnos_port": 5666,
+  "default_save_dir": "${SAVEDIR}",
+  "dir_map": []
+}
+EOF
+    chmod 600 "${CONFIG}"
+fi
+
+echo "$(date '+%Y-%m-%d %H:%M:%S') - installed, config: ${CONFIG} (user=${FNOS_USER}, savedir=${SAVEDIR:-<下载中心默认>})" >> "${PKGVAR}/main.log"
+
+# 首次安装即写入最近事件占位
+echo "[]" > "${PKGVAR}/recent.json"
+
+exit 0

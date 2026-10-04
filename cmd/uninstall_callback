@@ -1,0 +1,16 @@
+#!/bin/bash
+#
+# 下载中心接入Aria2 — 卸载后回调：按向导选择清理数据
+#
+set -uo pipefail
+LOG="${TRIM_TEMP_LOGFILE:-/dev/null}"
+log() { echo "[aria2bridge] $1" > "$LOG" 2>/dev/null || true; }
+pkill -f "@appcenter/aria2bridge.*bridge\.py" 2>/dev/null || true
+if [ "${wizard_delete_data:-no}" = "yes" ]; then
+    for d in "${TRIM_PKGETC:-/var/apps/aria2bridge/etc}" "${TRIM_PKGVAR:-/var/apps/aria2bridge/var}" /vol*/@appdata/aria2bridge; do
+        if [ -d "$d" ]; then rm -rf "$d" 2>/dev/null || true; log "已删除: $d"; fi
+    done
+else
+    log "保留配置与日志"
+fi
+exit 0

@@ -1,0 +1,14 @@
+{
+    ".url": {
+        "aria2bridge.Application": {
+            "title": "下载中心接入Aria2",
+            "desc": "Aria2 协议 → 飞牛下载中心",
+            "icon": "images/icon_{0}.png",
+            "type": "url",
+            "port": "6800",
+            "protocol": "http",
+            "url": "/",
+            "allUsers": false
+        }
+    }
+}
