@@ -14,6 +14,9 @@ aria2bridge — Aria2 JSON-RPC 协议桥接 飞牛「下载中心」
 """
 
 import argparse
+import base64
+import binascii
+import hmac
 import json
 import os
 import re
@@ -22,6 +25,7 @@ import sys
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from urllib.parse import urlsplit
 
 # ---------------------------------------------------------------------------
 # 全局状态
@@ -164,7 +168,12 @@ def apply_config(updates):
     只允许改有限字段;fnos 账号/密码/端口等不在此暴露。
     """
     if "secret" in updates:
-        CFG["secret"] = str(updates["secret"] or "")
+        if not isinstance(updates["secret"], str) or not updates["secret"].strip():
+            raise ValueError("RPC 密钥不能为空，请在飞牛应用设置中配置")
+    if "dir_map" in updates and not isinstance(updates["dir_map"], list):
+        raise ValueError("dir_map 必须是数组")
+    if "secret" in updates:
+        CFG["secret"] = updates["secret"]
     if "default_save_dir" in updates:
         v = str(updates["default_save_dir"] or "").strip()
         if v:
@@ -477,15 +486,21 @@ def to_aria_task(task):
 # ---------------------------------------------------------------------------
 # Aria2 JSON-RPC 方法实现
 # ---------------------------------------------------------------------------
+def secret_matches(token):
+    """没有配置密钥时拒绝访问;UTF-8 bytes 支持非 ASCII 密钥。"""
+    secret = CFG.get("secret", "")
+    return (isinstance(secret, str) and bool(secret.strip())
+            and isinstance(token, str)
+            and hmac.compare_digest(token.encode("utf-8"), secret.encode("utf-8")))
+
+
 def check_token(params):
-    """去掉并校验 token:xxx 参数;失败抛异常"""
-    if params and isinstance(params[0], str) and params[0].startswith("token:"):
-        tok = params[0][6:]
-        params = params[1:]
-        secret = CFG.get("secret", "")
-        if secret and tok != secret:
-            raise RpcError(1, "Token 验证失败")
-    return params
+    """每个 RPC 调用都必须携带正确的首位 token 参数。"""
+    if (not params or not isinstance(params[0], str)
+            or not params[0].startswith("token:")
+            or not secret_matches(params[0][6:])):
+        raise RpcError(1, "Token 验证失败")
+    return params[1:]
 
 
 class RpcError(Exception):
@@ -701,7 +716,7 @@ def dispatch(request):
     except RpcError as e:
         return {"jsonrpc": "2.0", "id": rid, "error": {"code": e.code, "message": e.message}}
     except Exception as e:  # noqa: BLE001
-        log("rpc error: %s %s → %s" % (method, request.get("params"), e))
+        log("rpc error: %s → %s" % (method, e))
         return {"jsonrpc": "2.0", "id": rid, "error": {"code": 1, "message": str(e)}}
 
 
@@ -994,7 +1009,7 @@ function loadLogs(){
   <div class="modal">
     <h3>设置<span><button class="x" onclick="closeSettings()">✕</button></span></h3>
     <div class="frow"><label>RPC 密钥</label>
-      <input class="inp" id="s-secret" placeholder="留空表示不校验 token"></div>
+      <input class="inp" id="s-secret" placeholder="请输入非空 RPC 密钥"></div>
     <div class="frow"><label>默认保存目录</label>
       <input class="inp" id="s-savedir" placeholder="/vol1/Download"></div>
     <div class="frow"><label>事件保留天数</label>
@@ -1007,7 +1022,7 @@ function loadLogs(){
     <div class="frow" style="align-items:flex-start"><label style="padding-top:8px">目录映射</label>
       <textarea class="ta" id="s-dirmap" placeholder='[{"from": "/downloads", "to": "/vol1/Download"}]'></textarea></div>
     <div class="fhint">把推送方填的保存路径前缀映射到飞牛卷路径，按从上到下匹配；留空 [] 则仅用默认保存目录。</div>
-    <div class="fhint" style="color:#f59e0b">修改 RPC 密钥后，需在推送软件里同步更新。</div>
+    <div class="fhint" style="color:#f59e0b">修改 RPC 密钥后，需在推送软件里同步更新，并使用新密钥重新登录管理页。</div>
     <div class="row" style="margin-top:14px;justify-content:flex-end">
       <span class="cnt" id="s-status" style="margin-right:auto"></span>
       <button class="mini" onclick="closeSettings()">取消</button>
@@ -1043,14 +1058,66 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(code)
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(data)))
-        self.send_header("Access-Control-Allow-Origin", "*")
+        if self.path.startswith("/jsonrpc"):
+            self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("X-Frame-Options", "DENY")
         self.end_headers()
         self.wfile.write(data)
 
+    def _authorize_management(self):
+        # Aria2 客户端继续用 RPC 参数 token,不能要求 HTTP Basic。
+        if self.path.startswith("/jsonrpc"):
+            return True
+        # 浏览器会自动发送 Basic 凭据,必须独立阻止跨源管理操作。
+        origin = self.headers.get("Origin")
+        try:
+            parsed = urlsplit(origin) if origin else None
+            cross_origin = (origin is not None and
+                            (parsed.scheme not in ("http", "https") or
+                             parsed.netloc != self.headers.get("Host")))
+        except ValueError:
+            cross_origin = True
+        if cross_origin or self.headers.get("Sec-Fetch-Site") == "cross-site":
+            self.close_connection = True
+            self._send(403, json.dumps({"error": "Cross-origin management request denied"}))
+            return False
+        if not isinstance(CFG.get("secret"), str) or not CFG["secret"].strip():
+            self.close_connection = True
+            self._send(503, json.dumps({"error": "Set a non-empty RPC Secret in fnOS application settings first"}))
+            return False
+        authorization = self.headers.get("Authorization", "")
+        scheme, _, encoded = authorization.partition(" ")
+        try:
+            decoded = base64.b64decode(encoded, validate=True).decode("utf-8")
+            username, separator, password = decoded.partition(":")
+            if (scheme.lower() == "basic" and separator and
+                    username == "aria2bridge" and secret_matches(password)):
+                return True
+        except (ValueError, UnicodeError, binascii.Error):
+            pass
+        # POST body 未消费,不能复用 HTTP/1.1 连接解析它。
+        self.close_connection = True
+        body = b'{"error": "Management authentication required"}'
+        self.send_response(401)
+        self.send_header("WWW-Authenticate", 'Basic realm="aria2bridge", charset="UTF-8"')
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Connection", "close")
+        self.end_headers()
+        self.wfile.write(body)
+        return False
+
     def do_OPTIONS(self):
+        if not self._authorize_management():
+            return
         self._send(204, b"", "text/plain")
 
     def do_GET(self):
+        if not self._authorize_management():
+            return
         if self.path == "/" or self.path.startswith("/index"):
             self._send(200, self.status_page(), "text/html; charset=utf-8")
             return
@@ -1066,6 +1133,7 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Content-Type", "text/plain; charset=utf-8")
             self.send_header("Content-Length", str(len(body)))
             self.send_header("Content-Disposition", "attachment; filename=bridge.log")
+            self.send_header("Cache-Control", "no-store")
             self.end_headers()
             self.wfile.write(body)
             return
@@ -1096,6 +1164,8 @@ class Handler(BaseHTTPRequestHandler):
         self._send(404, json.dumps({"error": "not found"}))
 
     def do_POST(self):
+        if not self._authorize_management():
+            return
         if self.path.startswith("/api/events/clear"):
             clear_recent()
             self._send(200, json.dumps({"ok": True}))
@@ -1158,11 +1228,11 @@ class Handler(BaseHTTPRequestHandler):
 
     def status_page(self):
         secret = CFG.get("secret", "")
-        shown = secret if secret else "（未设置 secret,任意 token 可用）"
+        shown = secret if secret else "（未设置 Secret，访问已禁用）"
         html = (STATUS_HTML
                 .replace("__PORT__", str(CFG.get("port", 6800)))
-                .replace("__SECRET_HTML__", json.dumps(shown, ensure_ascii=False))
-                .replace("__EVENTS__", json.dumps(RECENT, ensure_ascii=False)))
+                .replace("__SECRET_HTML__", json.dumps(shown, ensure_ascii=False).replace("<", "\\u003c"))
+                .replace("__EVENTS__", json.dumps(RECENT, ensure_ascii=False).replace("<", "\\u003c")))
         return html
 
     def selftest(self):

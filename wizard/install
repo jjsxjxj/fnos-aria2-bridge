@@ -50,7 +50,7 @@
                 "type": "text",
                 "field": "wizard_secret",
                 "label": "Aria2 RPC 密钥（Secret，填写到 DBO 的 Aria2 设置里）",
-                "initValue": "dfc4e90c7853a46668cae6f3",
+                "initValue": "",
                 "rules": [
                     {
                         "required": true,
