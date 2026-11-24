@@ -21,7 +21,8 @@ Aria2 客户端 (DBO / AriaNg / …)
 ## 功能
 
 - **标准 Aria2 JSON-RPC 协议**：`getVersion` / `getGlobalStat` / `addUri` / `tellActive` / `tellWaiting` / `tellStopped` / `tellStatus` / `pause` / `unpause` / `remove` / `forceRemove` / `removeDownloadResult` / `getOption` / `getGlobalOption` / `changeGlobalOption` / `system.multicall` / 批量请求 / GET 查询，全方法兼容
-- **token 鉴权**（`token:secret`）
+- **token 鉴权**（每个 RPC 调用必须携带 `token:secret`，包含批量和 multicall 内部调用）
+- **管理页鉴权**：HTTP Basic，用户名 `aria2bridge`，密码为 RPC Secret；状态、设置、自检、事件和日志接口统一保护
 - **保存路径映射**（dir_map）：把客户端填写的路径前缀映射到飞牛 `/vol*` 卷路径
 - **假失败容错**：飞牛接口偶发响应慢（实测约 9 秒）时，自动轮询任务列表确认任务是否已创建，避免「任务建了却报失败」
 - **状态页**（桌面图标打开）：
@@ -39,8 +40,25 @@ Aria2 客户端 (DBO / AriaNg / …)
 3. 飞牛应用中心 → 手动安装 → 选择 fpk，按向导填写：
    - 飞牛账号（**未开启两步验证**的账号）与密码
    - 服务端口（默认 `6800`）
-   - RPC 密钥（Secret）
+   - RPC 密钥（Secret，设置独立的非空随机密钥，不要复用飞牛账号密码）
    - 默认保存目录
+
+## 管理页登录与升级
+
+打开桌面图标或 `http://<飞牛IP>:6800/` 时，浏览器会要求登录：用户名为
+`aria2bridge`，密码为安装时填写的 **RPC Secret**，不是飞牛账号密码。
+设置、自检、日志下载继续使用同一登录。修改 Secret 后，浏览器需要使用新密钥重新登录，
+所有 RPC 客户端也要同步更新。
+
+升级旧安装时，请先通过飞牛应用设置配置一个独立的非空随机 Secret，并更换旧安装向导
+曾预填的默认密钥。空密钥配置不再允许匿名访问：管理接口返回 503，RPC 返回认证错误；
+通过飞牛应用设置补填 Secret 后重启桥接即可恢复。已有自定义非空密钥无需变更。
+
+管理接口不接受跨源浏览器请求，且不再提供通配 CORS。RPC 客户端仍在每个调用的首个
+参数发送 `token:secret`，不需要 HTTP Basic；`system.multicall` 的每个内部调用分别带 token。
+
+HTTP Basic 与 HTTP RPC 都不会加密传输。仅在受控网络使用，建议通过 HTTPS 反向代理
+保护传输并限制来源地址；不要直接映射公网端口，也不要在 URL 中放置管理密码。
 
 ## 接入方法（通用）
 
@@ -86,13 +104,13 @@ app/            # 应用本体（bridge.py + 内置 trim-cli）
 test/           # 集成测试（mock trim-cli，38 项）
 ```
 
-运行测试：`python test/test_bridge.py`（自动启动 bridge + mock trim-cli，覆盖协议层全部方法与容错分支）。
+运行测试：`python test/test_bridge.py`（自动启动 bridge + mock trim-cli，覆盖协议层全部方法与容错分支）及 `python test/test_auth.py`（隔离的本机认证、管理权限和跨源回归测试，无需 NAS）。
 
 ## 已知限制
 
 - 仅提供 **x86_64** 包
 - 飞牛 `task.addUris` 不支持 **ed2k** 链接（http/https/ftp/sftp/magnet 可用）
-- 状态页**无鉴权**，请勿把 6800 端口映射到公网
+- 状态页及管理接口需要认证；仍请勿把 6800 端口直接映射到公网
 - 需使用**未开启两步验证**的飞牛账号（桥接需程序化登录）
 - 飞牛账号密码仅保存在应用配置目录（`config.json`，权限 600），建议使用专用低权限账号
 - 接口基于 fnOS 当前版本的 `appcgi.downloadcenter.*`，飞牛大版本更新后如有变化需适配

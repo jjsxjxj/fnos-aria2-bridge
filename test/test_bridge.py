@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 """本地集成测试: bridge.py + mock trim-cli, 验证 aria2 JSON-RPC 协议层"""
+import base64
 import json
 import os
 import subprocess
@@ -20,6 +21,18 @@ PY = sys.executable
 PORT = 16800
 SECRET = "testsecret123"
 BASE = "http://127.0.0.1:%d" % PORT
+
+# 管理 UI 使用 Basic;RPC 仍仅使用参数 token。
+_urlopen = urllib.request.urlopen
+
+def authorized_open(url, *args, **kwargs):
+    req = urllib.request.Request(url) if isinstance(url, str) else url
+    if not urllib.parse.urlsplit(req.full_url).path.startswith("/jsonrpc"):
+        req.add_header("Authorization", "Basic " + base64.b64encode(
+            ("aria2bridge:" + SECRET).encode()).decode())
+    return _urlopen(req, *args, **kwargs)
+
+urllib.request.urlopen = authorized_open
 
 FAILS = []
 
