@@ -1,5 +1,5 @@
 appname               = aria2bridge
-version               = 1.0.18
+version               = 1.0.19
 display_name          = 下载中心接入Aria2
 desc                  = 给飞牛「下载中心」开一个标准 Aria2 接口：任何支持 Aria2 协议的软件都能把下载任务直接推进飞牛「下载中心」，进度实时同步。<br/><br/><strong>接入方法（通用）：</strong>在软件的 Aria2 / RPC 设置里填写：主机 = 飞牛主机 IP，端口 = 6800，密钥 = 安装向导中设置的 Secret。<br/><br/>桌面图标打开状态页，可查看接入参数（一键复制）、自检连通性、浏览最近推送记录。<br/><br/>注意：请使用未开启两步验证的飞牛账号；账号密码仅保存在本机应用配置目录。
 source                = thirdparty
