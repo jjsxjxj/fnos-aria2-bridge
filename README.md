@@ -95,11 +95,10 @@ HTTP Basic 与 HTTP RPC 都不会加密传输。仅在受控网络使用，建�
 fnpack build .
 ```
 
-打 ARM 包：把 `manifest` 里的 `platform` 改成 `arm` 再 `fnpack build`。`cmd/main` 会按宿主机
-架构自动挑 trim-cli（原生 aarch64 > 系统自带 > PATH > 随包 x86）。若希望在没有原生 trim-cli 的
-ARM 设备上也能跑，需额外把 **aarch64 版** `qemu-x86_64-static` 放进 `app/bin/`，并把 x86 sysroot
-（`ld-linux-x86-64.so.2`、`libc.so.6` 等）放进 `app/x64root/`；缺这两个目录时会直接回退到系统
-trim-cli，找不到则启动时在日志里给出提示。
+打 ARM 包：把 `manifest` 里的 `platform` 改成 `arm` 再 `fnpack build`，并且**不要把 x86 版
+trim-cli 打进 ARM 包**。`cmd/main` 会按宿主机架构挑 trim-cli：同架构随包二进制 > 系统自带
+（ARM 上会校验必须是 aarch64，并自动复制进应用目录）> PATH；拿不到原生版就明确报错退出，
+不会用 qemu 硬跑异架构二进制。
 
 包内目录结构：
 
@@ -117,7 +116,9 @@ test/           # 集成测试（mock trim-cli，38 项）
 ## 已知限制
 
 - 提供 **x86_64** 与 **ARM64** 两个包，按飞牛设备架构选择
-- ARM 包优先使用飞牛系统自带的 `/usr/trim/bin/trim-cli`（aarch64 原生）；若系统未提供，则用随包的 qemu-user 静态解释器运行 x86 版 trim-cli，此时会有明显性能损耗。也可自行把 aarch64 版 trim-cli 放到应用目录并命名为 `trim-cli-linux-arm64`
+- **ARM 包不含 trim-cli**，必须使用飞牛自带的 aarch64 版：启动时会自动从 `/usr/trim/bin/trim-cli` 复制到应用目录；若取不到，请手动执行
+  `cp /usr/trim/bin/trim-cli /var/apps/aria2bridge/app/trim-cli-linux-arm64 && chmod +x` 后重启应用
+- **不要用 qemu 模拟运行 x86 版 trim-cli**：trim-cli 是 Rust 程序，启动时会读 `/proc/self/maps`，在 qemu 用户态下必然 `SIGSEGV`（`code=MAPERR, addr=0x20`）
 - 飞牛 `task.addUris` 不支持 **ed2k** 链接（http/https/ftp/sftp/magnet 可用）
 - 状态页及管理接口需要认证；仍请勿把 6800 端口直接映射到公网
 - 需使用**未开启两步验证**的飞牛账号（桥接需程序化登录）
@@ -128,6 +129,7 @@ test/           # 集成测试（mock trim-cli，38 项）
 
 | 版本 | 要点 |
 |---|---|
+| 1.0.20 | 修复 ARM 包：移除无效的 qemu 模拟，改用飞牛自带的 aarch64 trim-cli；找不到原生版时明确报错而不是让 qemu 崩溃 |
 | 1.0.19 | **安全修复**：RPC 每次调用强制校验 token、管理接口改用 HTTP Basic、跨源管理请求拒绝、空 Secret 失败关闭、向导不再预填公开密钥；**新增 ARM64 包** |
 | 1.0.18 | 运行日志 30 天按行自动清理（可配置） |
 | 1.0.17 | 日志 5MB 滚动；修复日志重复写入 |

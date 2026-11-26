@@ -72,8 +72,6 @@ status() {
     return 1
 }
 
-# 解析 trim-cli：优先原生 aarch64，其次系统自带，最后才是随包 x86 版
-# ARM 版 fpk 依赖此函数；fnOS 会把系统架构放在 TRIM_SYS_ARCH
 host_arch() {
     case "$(uname -m 2>/dev/null)" in
         aarch64|arm64) echo arm ;;
@@ -92,55 +90,47 @@ elf_arch() {
     esac
 }
 
+# 解析 trim-cli：按宿主架构挑，绝不用 qemu 跑异架构二进制
+# trim-cli 是 Rust 程序，启动时会读 /proc/self/maps，qemu 用户态模拟必崩（SIGSEGV）
 resolve_trim_cli() {
-    local cand h
+    local cand h dest
     h="$(host_arch)"
-    # 0) 与宿主同架构的随包二进制优先，保持各架构原有行为
+
+    # 1) 与宿主同架构的随包二进制
     if [ "$h" = "x86" ]; then
         for cand in "${APPDEST}/trim-cli-linux-x64" "${APPDEST}/app/trim-cli-linux-x64"; do
             if [ -f "$cand" ]; then printf '%s' "$cand"; return 0; fi
         done
+    else
+        for cand in "${APPDEST}/trim-cli-linux-arm64" "${APPDEST}/app/trim-cli-linux-arm64" \
+                    "${APPDEST}/trim-cli" "${APPDEST}/app/trim-cli"; do
+            if [ -f "$cand" ]; then printf '%s' "$cand"; return 0; fi
+        done
     fi
-    # 1) 应用目录里的原生 ARM 版（用户自行放入时优先）
-    for cand in "${APPDEST}/trim-cli-linux-arm64" "${APPDEST}/app/trim-cli-linux-arm64" \
-                "${APPDEST}/trim-cli" "${APPDEST}/app/trim-cli"; do
-        if [ -f "$cand" ]; then printf '%s' "$cand"; return 0; fi
-    done
-    # 2) 系统自带（ARM 飞牛自带 aarch64 版 trim-cli）
+
+    # 2) 系统自带；ARM 上必须确认是 aarch64，并顺手复制进应用目录
     for cand in /usr/trim/bin/trim-cli /usr/trim/sbin/trim-cli \
                 /usr/bin/trim-cli /usr/local/bin/trim-cli; do
-        if [ -x "$cand" ]; then printf '%s' "$cand"; return 0; fi
+        [ -x "$cand" ] || continue
+        if [ "$h" = "arm" ]; then
+            [ "$(elf_arch "$cand")" = "arm64" ] || continue
+            if [ -d "${APPDEST}/app" ]; then dest="${APPDEST}/app/trim-cli-linux-arm64"
+            else dest="${APPDEST}/trim-cli-linux-arm64"; fi
+            if cp -f "$cand" "$dest" 2>/dev/null && chmod +x "$dest" 2>/dev/null; then
+                printf '%s' "$dest"; return 0
+            fi
+        fi
+        printf '%s' "$cand"; return 0
     done
-    # 3) PATH
+
+    # 3) PATH（ARM 上同样拒绝 x86）
     if cand=$(command -v trim-cli 2>/dev/null) && [ -n "$cand" ]; then
+        if [ "$h" = "arm" ] && [ "$(elf_arch "$cand")" != "arm64" ]; then
+            return 1
+        fi
         printf '%s' "$cand"; return 0
     fi
-    # 4) 兜底：随包 x86 版（仅当宿主有 qemu-user 时可用）
-    for cand in "${APPDEST}/trim-cli-linux-x64" "${APPDEST}/app/trim-cli-linux-x64"; do
-        if [ -f "$cand" ]; then printf '%s' "$cand"; return 0; fi
-    done
     return 1
-}
-
-# ARM 宿主上遇到 x86 二进制时，生成一个 qemu 包装脚本
-# 用法: qemu_wrap <x86二进制> <qemu-x86_64-static> <x86 sysroot>
-qemu_wrap() {
-    local bin="$1" qemu="$2" sysroot="$3" wrapper dir
-    dir="${APPDEST}/bin"
-    [ -d "$dir" ] || dir="${PKGVAR}"
-    mkdir -p "$dir" 2>/dev/null || true
-    wrapper="${dir}/trim-cli-qemu"
-    # 卷上若禁止执行，退回 var 目录再试一次
-    if ! { : > "$wrapper"; } 2>/dev/null; then
-        wrapper="${PKGVAR}/trim-cli-qemu"
-        mkdir -p "${PKGVAR}"
-    fi
-    cat > "$wrapper" <<EOF
-#!/bin/sh
-exec "${qemu}" -L "${sysroot}" "${bin}" "\$@"
-EOF
-    chmod +x "$wrapper"
-    printf '%s' "$wrapper"
 }
 
 start_process() {
@@ -168,25 +158,19 @@ start_process() {
 
     local TRIM_BIN
     if ! TRIM_BIN="$(resolve_trim_cli)"; then
-        log_msg "FATAL: 未找到 trim-cli（应用目录与系统路径均无）"
-        echo "[aria2bridge] 未找到 trim-cli：ARM 飞牛应自带 /usr/trim/bin/trim-cli，请确认系统版本；也可把 aarch64 版 trim-cli 放到 ${APPDEST}/trim-cli-linux-arm64" > "${TRIM_TEMP_LOGFILE:-/dev/null}" 2>&1 || true
+        local HINT="未找到 aarch64 版 trim-cli。请把飞牛自带的 /usr/trim/bin/trim-cli 复制为 ${APPDEST}/app/trim-cli-linux-arm64 并 chmod +x 后重启应用。"
+        log_msg "FATAL: no usable trim-cli (arch=$(host_arch))"
+        echo "[aria2bridge] ${HINT}" > "${TRIM_TEMP_LOGFILE:-/dev/null}" 2>&1 || true
         return 1
     fi
     chmod +x "${TRIM_BIN}" 2>/dev/null || true
 
-    # ARM 宿主 + x86 二进制 → 用随包 qemu 兜底
+    # ARM 上拿到 x86 二进制直接拒绝：qemu 模拟会在启动时 SIGSEGV，跑不通
     if [ "$(host_arch)" = "arm" ] && [ "$(elf_arch "${TRIM_BIN}")" = "x64" ]; then
-        local QEMU="${APPDEST}/bin/qemu-x86_64-static" SYSROOT="${APPDEST}/x64root"
-        if [ ! -x "$QEMU" ]; then
-            QEMU="$(command -v qemu-x86_64-static 2>/dev/null || true)"
-        fi
-        if [ -n "$QEMU" ] && [ -x "$QEMU" ] && [ -d "$SYSROOT" ]; then
-            chmod +x "$QEMU" 2>/dev/null || true
-            TRIM_BIN="$(qemu_wrap "$TRIM_BIN" "$QEMU" "$SYSROOT")"
-            log_msg "使用 qemu 包装运行 x86 trim-cli（无原生 aarch64 版）"
-        else
-            log_msg "WARN: 只有 x86 trim-cli，且缺少 qemu 或 x64root，桥接无法调用下载中心"
-        fi
+        local HINT="trim-cli 是 x86 版本（${TRIM_BIN}），ARM 上无法运行，也不能用 qemu 模拟。请改用飞牛自带的 aarch64 版：cp /usr/trim/bin/trim-cli ${APPDEST}/app/trim-cli-linux-arm64 && chmod +x 该文件。"
+        log_msg "FATAL: trim-cli arch mismatch (x64 on arm): ${TRIM_BIN}"
+        echo "[aria2bridge] ${HINT}" > "${TRIM_TEMP_LOGFILE:-/dev/null}" 2>&1 || true
+        return 1
     fi
 
     local PORT
