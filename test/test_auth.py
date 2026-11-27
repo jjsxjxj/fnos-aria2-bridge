@@ -164,5 +164,35 @@ class AuthenticationTests(unittest.TestCase):
         self.assertIn('\\u003c/script>', body)
 
 
+
+class ConfigValidationTests(unittest.TestCase):
+    """设置面板保存管理页凭据的校验与落盘。"""
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        bridge.CFG = {'secret': 's3cret-value', 'port': 6800}
+        bridge.CFG_PATH = str(Path(self.temp.name) / 'config.json')
+        bridge.VAR_DIR = self.temp.name
+        bridge.RECENT = []
+        Path(bridge.CFG_PATH).write_text(json.dumps(bridge.CFG))
+
+    def tearDown(self):
+        self.temp.cleanup()
+
+    def test_admin_credentials_validation_and_persist(self):
+        with self.assertRaises(ValueError):
+            bridge.apply_config({'admin_user': '   '})
+        with self.assertRaises(ValueError):
+            bridge.apply_config({'admin_password': '123'})
+
+        bridge.apply_config({'admin_user': ' bob ', 'admin_password': 'abcdef'})
+        self.assertEqual(bridge.CFG['admin_user'], 'bob')
+        self.assertEqual(bridge.CFG['admin_password'], 'abcdef')
+
+        saved = json.loads(Path(bridge.CFG_PATH).read_text(encoding='utf-8'))
+        self.assertEqual(saved['admin_user'], 'bob')
+        self.assertEqual(saved['admin_password'], 'abcdef')
+        self.assertNotIn('admin_password', json.dumps(bridge.Handler.view_config(None)))
+
 if __name__ == '__main__':
     unittest.main()

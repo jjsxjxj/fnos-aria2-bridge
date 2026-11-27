@@ -172,6 +172,16 @@ def apply_config(updates):
             raise ValueError("RPC 密钥不能为空，请在飞牛应用设置中配置")
     if "dir_map" in updates and not isinstance(updates["dir_map"], list):
         raise ValueError("dir_map 必须是数组")
+    if "admin_user" in updates:
+        u = updates["admin_user"]
+        if not isinstance(u, str) or not u.strip():
+            raise ValueError("管理页用户名不能为空")
+        CFG["admin_user"] = u.strip()
+    if "admin_password" in updates:
+        pwd = updates["admin_password"]
+        if not isinstance(pwd, str) or len(pwd) < 6:
+            raise ValueError("管理页密码至少 6 位")
+        CFG["admin_password"] = pwd
     if "secret" in updates:
         CFG["secret"] = updates["secret"]
     if "default_save_dir" in updates:
@@ -977,6 +987,8 @@ function closeSettings(){ document.getElementById('mask-settings').classList.rem
 function loadConfig(){
   fetch('/api/config').then(function(r){return r.json()}).then(function(j){
     document.getElementById('s-secret').value = j.secret || '';
+    document.getElementById('s-adminuser').value = j.admin_user || 'aria2bridge';
+    document.getElementById('s-adminpwd').value = '';
     document.getElementById('s-savedir').value = j.default_save_dir || '';
     document.getElementById('s-days').value = j.event_retention_days;
     document.getElementById('s-maxn').value = j.event_max_count;
@@ -991,12 +1003,15 @@ function saveConfig(){
   if (!Array.isArray(dirmap)) { alert('目录映射必须是数组'); return; }
   var body = {
     secret: document.getElementById('s-secret').value.trim(),
+    admin_user: document.getElementById('s-adminuser').value.trim(),
     default_save_dir: document.getElementById('s-savedir').value.trim(),
     event_retention_days: parseInt(document.getElementById('s-days').value, 10) || 30,
     event_max_count: parseInt(document.getElementById('s-maxn').value, 10) || 1000,
     log_retention_days: parseInt(document.getElementById('s-logdays').value, 10) || 30,
     dir_map: dirmap,
   };
+  var _pwd = document.getElementById('s-adminpwd').value;
+  if (_pwd) { body.admin_password = _pwd; }
   var st = document.getElementById('s-status');
   st.textContent = '保存中…';
   fetch('/api/config', {method:'POST', headers:{'Content-Type':'application/json'},
@@ -1022,6 +1037,11 @@ function loadLogs(){
 <div class="mask" id="mask-settings">
   <div class="modal">
     <h3>设置<span><button class="x" onclick="closeSettings()">✕</button></span></h3>
+    <div class="frow"><label>管理页用户名</label>
+      <input class="inp" id="s-adminuser" placeholder="登录管理页的用户名，不是飞牛账号"></div>
+    <div class="frow"><label>管理页密码</label>
+      <input class="inp" id="s-adminpwd" type="password" placeholder="留空表示不修改，至少 6 位"></div>
+    <div class="fhint">改完需用新账号重新登录管理页；旧版本升级上来的默认是 aria2bridge + RPC 密钥。</div>
     <div class="frow"><label>RPC 密钥</label>
       <input class="inp" id="s-secret" placeholder="请输入非空 RPC 密钥"></div>
     <div class="frow"><label>默认保存目录</label>
@@ -1227,6 +1247,7 @@ class Handler(BaseHTTPRequestHandler):
             "event_max_count": mx,
             "log_retention_days": log_days,
             "dir_map": CFG.get("dir_map", []),
+            "admin_user": CFG.get("admin_user") or "aria2bridge",
         }
 
     def log_text(self, max_lines=None):
