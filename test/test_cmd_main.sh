@@ -38,11 +38,12 @@ bash -c "source '$TMP/fn.sh'; [ \"\$(elf_arch '$TMP/arm.bin')\" = arm64 ]" && pa
 bash -c "source '$TMP/fn.sh'; [ \"\$(elf_arch '$TMP/x64.bin')\" = x64 ]"   && pass "x86-64 识别为 x64"    || fail "x86-64 识别错误"
 bash -c "source '$TMP/fn.sh'; [ \"\$(elf_arch '$TMP/txt.bin')\" = other ]" && pass "非 ELF 识别为 other"   || fail "非 ELF 识别错误"
 
-echo "== resolve_trim_cli（当前宿主: $(uname -m)）=="
-setup; out=$(run_resolve ":"); [ -z "$out" ] && pass "无任何候选时失败" || fail "无候选却返回: $out"
+echo "== resolve_trim_cli（当前宿主: $(uname -m)，下面逐例固定 host_arch）=="
+setup; out=$(run_resolve "host_arch() { echo arm; }")
+[ -z "$out" ] && pass "ARM 无任何候选时失败" || fail "无候选却返回: $out"
 
 setup; mkelif '\xb7\x00' "$TMP/app/trim-cli-linux-arm64"
-out=$(run_resolve ":")
+out=$(run_resolve "host_arch() { echo arm; }")
 case "$out" in */trim-cli-linux-arm64) pass "arm64 随包被选中";; *) fail "arm64 随包未选中: $out";; esac
 
 setup; mkelif '\x3e\x00' "$TMP/app/trim-cli-linux-x64"
@@ -51,6 +52,10 @@ out=$(run_resolve "host_arch() { echo arm; }")
 
 out=$(run_resolve "host_arch() { echo x86; }")
 case "$out" in */trim-cli-linux-x64) pass "x86 宿主选中 x64 随包";; *) fail "x86 宿主未选中: $out";; esac
+
+setup; mkelif '\xb7\x00' "$TMP/app/trim-cli-linux-arm64"
+out=$(run_resolve "host_arch() { echo x86; }")
+[ -z "$out" ] && pass "x86 宿主不误用 arm64 随包" || fail "x86 上误用 arm64: $out"
 
 echo "== trim_cli_pwd_login_ok 版本预检 =="
 cat > "$TMP/good" <<'EOS'
