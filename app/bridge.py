@@ -1275,7 +1275,14 @@ def main():
     LOG_TRIM_CHECK["at"] = time.time()
 
     here = os.path.dirname(os.path.abspath(__file__))
-    TRIM_BIN = args.trim_cli or os.path.join(here, "trim-cli-linux-x64")
+    # 按宿主架构选默认随包二进制（cmd/main 正常会显式传 --trim-cli，这里只是源码直跑时的兜底）
+    try:
+        import platform as _platform
+        _m = _platform.machine().lower()
+    except Exception:
+        _m = ""
+    _def_bin = "trim-cli-linux-arm64" if _m in ("aarch64", "arm64") else "trim-cli-linux-x64"
+    TRIM_BIN = args.trim_cli or os.path.join(here, _def_bin)
     if not os.path.exists(TRIM_BIN):
         # 本地测试兜底: 同目录或 PATH
         for cand in (os.path.join(here, "trim-cli"), "trim-cli"):

@@ -81,8 +81,17 @@ host_arch() {
 
 # 读 ELF e_machine：b700=aarch64 / 3e00=x86-64 / 其它=非 ELF
 elf_arch() {
-    local m
-    m=$(od -An -tx1 -j18 -N2 "$1" 2>/dev/null | tr -d ' \n')
+    local m=""
+    if command -v od >/dev/null 2>&1; then
+        m=$(od -An -tx1 -j18 -N2 "$1" 2>/dev/null | tr -d ' \n')
+    elif [ -n "${PY_CACHED:-}" ]; then
+        m=$("${PY_CACHED}" -c 'import sys
+try:
+    f=open(sys.argv[1],"rb"); f.seek(18); b=f.read(2)
+    print("%02x%02x" % (b[0], b[1]) if len(b) == 2 else "")
+except Exception:
+    print("")' "$1" 2>/dev/null)
+    fi
     case "$m" in
         b700) echo arm64 ;;
         3e00) echo x64 ;;
@@ -90,35 +99,57 @@ elf_arch() {
     esac
 }
 
+# 把系统 trim-cli 复制进应用可写目录（仅作稳定性优化：复制失败也必须能继续用系统路径）
+copy_trim_cli() {
+    local src="$1" dest
+    # PKGVAR 一定可写；APPDEST 在多数设备上是 root 所有，可能写不进去
+    for dest in "${PKGVAR}/trim-cli-linux-arm64" \
+                "${APPDEST}/app/trim-cli-linux-arm64" \
+                "${APPDEST}/trim-cli-linux-arm64"; do
+        [ -d "$(dirname "$dest")" ] || continue
+        if cp -f "$src" "$dest" 2>/dev/null && chmod +x "$dest" 2>/dev/null; then
+            printf '%s' "$dest"
+            return 0
+        fi
+    done
+    return 1
+}
+
 # 解析 trim-cli：按宿主架构挑，绝不用 qemu 跑异架构二进制
 # trim-cli 是 Rust 程序，启动时会读 /proc/self/maps，qemu 用户态模拟必崩（SIGSEGV）
 resolve_trim_cli() {
-    local cand h dest
+    local cand h a copied
     h="$(host_arch)"
 
-    # 1) 与宿主同架构的随包二进制
+    # 1) 与宿主同架构的随包二进制（版本受控，最优先）
     if [ "$h" = "x86" ]; then
         for cand in "${APPDEST}/trim-cli-linux-x64" "${APPDEST}/app/trim-cli-linux-x64"; do
             if [ -f "$cand" ]; then printf '%s' "$cand"; return 0; fi
         done
     else
         for cand in "${APPDEST}/trim-cli-linux-arm64" "${APPDEST}/app/trim-cli-linux-arm64" \
-                    "${APPDEST}/trim-cli" "${APPDEST}/app/trim-cli"; do
+                    "${APPDEST}/trim-cli" "${APPDEST}/app/trim-cli" \
+                    "${PKGVAR}/trim-cli-linux-arm64"; do
             if [ -f "$cand" ]; then printf '%s' "$cand"; return 0; fi
         done
     fi
 
-    # 2) 系统自带；ARM 上必须确认是 aarch64，并顺手复制进应用目录
+    # 2) 系统自带；ARM 上必须确认是 aarch64。
+    #    能复制进应用目录就复制，复制失败（权限不足）直接用系统路径，不再当作致命错误。
     for cand in /usr/trim/bin/trim-cli /usr/trim/sbin/trim-cli \
                 /usr/bin/trim-cli /usr/local/bin/trim-cli; do
-        [ -x "$cand" ] || continue
+        [ -f "$cand" ] && [ -x "$cand" ] || continue
         if [ "$h" = "arm" ]; then
-            [ "$(elf_arch "$cand")" = "arm64" ] || continue
-            if [ -d "${APPDEST}/app" ]; then dest="${APPDEST}/app/trim-cli-linux-arm64"
-            else dest="${APPDEST}/trim-cli-linux-arm64"; fi
-            if cp -f "$cand" "$dest" 2>/dev/null && chmod +x "$dest" 2>/dev/null; then
-                printf '%s' "$dest"; return 0
+            a="$(elf_arch "$cand")"
+            if [ "$a" != "arm64" ]; then
+                log_msg "skip system trim-cli ${cand}: arch=${a}"
+                continue
             fi
+            if copied="$(copy_trim_cli "$cand")"; then
+                log_msg "copied system trim-cli ${cand} -> ${copied}"
+                printf '%s' "$copied"; return 0
+            fi
+            log_msg "WARN: 无法复制 ${cand} 到应用目录，直接使用系统路径"
         fi
         printf '%s' "$cand"; return 0
     done
@@ -126,11 +157,34 @@ resolve_trim_cli() {
     # 3) PATH（ARM 上同样拒绝 x86）
     if cand=$(command -v trim-cli 2>/dev/null) && [ -n "$cand" ]; then
         if [ "$h" = "arm" ] && [ "$(elf_arch "$cand")" != "arm64" ]; then
+            log_msg "skip PATH trim-cli ${cand}: arch=$(elf_arch "$cand")"
             return 1
         fi
         printf '%s' "$cand"; return 0
     fi
     return 1
+}
+
+# trim-cli 是否还支持账号密码登录（新版 CLI 删掉了 -u/-p，只剩 OAuth）
+# 0=支持 / 1=版本不兼容 / 2=二进制跑不起来
+trim_cli_pwd_login_ok() {
+    local bin="$1" out rc
+    out="$("$bin" login --help 2>&1)"
+    rc=$?
+    if [ $rc -ne 0 ]; then
+        case "$out" in
+            *Options*) ;;                 # 有正常帮助输出，只是退出码非 0，视为可用
+            *) return 2 ;;                # 跑不起来：架构不符/缺库/不是可执行文件
+        esac
+    fi
+    case "$out" in
+        *Options*) ;;
+        *) return 2 ;;
+    esac
+    case "$out" in
+        *username*) return 0 ;;
+        *) return 1 ;;
+    esac
 }
 
 start_process() {
@@ -158,12 +212,32 @@ start_process() {
 
     local TRIM_BIN
     if ! TRIM_BIN="$(resolve_trim_cli)"; then
-        local HINT="未找到 aarch64 版 trim-cli。请把飞牛自带的 /usr/trim/bin/trim-cli 复制为 ${APPDEST}/app/trim-cli-linux-arm64 并 chmod +x 后重启应用。"
-        log_msg "FATAL: no usable trim-cli (arch=$(host_arch))"
-        echo "[aria2bridge] ${HINT}" > "${TRIM_TEMP_LOGFILE:-/dev/null}" 2>&1 || true
+        local H h="$(host_arch)"
+        if [ "$h" = "arm" ]; then
+            H="未找到可用的 aarch64 版 trim-cli。飞牛系统默认不预装 trim-cli，请把 arm64 版放到 ${APPDEST}/app/trim-cli-linux-arm64（或 ${APPDEST}/trim-cli-linux-arm64）并 chmod +x 后重启应用。"
+        else
+            H="未找到可用的 trim-cli。请把 x64 版放到 ${APPDEST}/app/trim-cli-linux-x64 并 chmod +x 后重启应用。"
+        fi
+        log_msg "FATAL: no usable trim-cli (arch=${h}, APPDEST=${APPDEST})"
+        echo "[aria2bridge] ${H}" > "${TRIM_TEMP_LOGFILE:-/dev/null}" 2>&1 || true
         return 1
     fi
     chmod +x "${TRIM_BIN}" 2>/dev/null || true
+
+    # trim-cli 版本预检：新版 CLI 删掉了 -u/-p，只有 OAuth，桥接的密码登录会一直失败
+    trim_cli_pwd_login_ok "${TRIM_BIN}"
+    case $? in
+        1)
+            log_msg "FATAL: ${TRIM_BIN} 的 login 不支持 -u/-p（新版 OAuth-only）"
+            echo "[aria2bridge] trim-cli 版本不兼容：${TRIM_BIN} 的 login 不支持账号密码（-u/-p），请换回支持密码登录的构建。" > "${TRIM_TEMP_LOGFILE:-/dev/null}" 2>&1 || true
+            return 1
+            ;;
+        2)
+            log_msg "FATAL: ${TRIM_BIN} 无法执行（架构或依赖库问题）"
+            echo "[aria2bridge] trim-cli 无法执行：${TRIM_BIN}（架构不符或缺少依赖库），详情见 ${PKGVAR}/main.log" > "${TRIM_TEMP_LOGFILE:-/dev/null}" 2>&1 || true
+            return 1
+            ;;
+    esac
 
     # ARM 上拿到 x86 二进制直接拒绝：qemu 模拟会在启动时 SIGSEGV，跑不通
     if [ "$(host_arch)" = "arm" ] && [ "$(elf_arch "${TRIM_BIN}")" = "x64" ]; then
