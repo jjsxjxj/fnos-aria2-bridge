@@ -36,7 +36,7 @@ Aria2 客户端 (DBO / AriaNg / …)
 ## 安装
 
 1. 在飞牛应用中心安装 **「Python 3.12」开发工具**（运行依赖）
-2. 从 [Releases](https://github.com/jjsxjxj/fnos-aria2-bridge/releases/latest) 下载 `aria2bridge.fpk`（或见[博客文章](https://813146.xyz/post/fnos-aria2-bridge-download-center)内的网盘渠道）
+2. 从 [Releases](https://github.com/jjsxjxj/fnos-aria2-bridge/releases/latest) 下载 `aria2bridge_<版本>_x86.fpk`（或见[博客文章](https://813146.xyz/post/fnos-aria2-bridge-download-center)内的网盘渠道）
 3. 飞牛应用中心 → 手动安装 → 选择 fpk，按向导填写：
    - **管理页用户名与密码**（自己设置，用于打开桌面图标后的登录，不是飞牛账号）
    - 飞牛账号（**未开启两步验证**的账号）与密码
