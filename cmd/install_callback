@@ -18,16 +18,20 @@ mkdir -p "${PKGETC}" "${PKGVAR}"
 FNOS_USER="${wizard_fnos_user:-admin}"
 FNOS_PASSWORD="${wizard_fnos_password:-}"
 SECRET="${wizard_secret:-}"
+ADMIN_USER="${wizard_admin_user:-}"
+ADMIN_PASSWORD="${wizard_admin_password:-}"
 SAVEDIR="${wizard_savedir:-}"
 PORT="${wizard_port:-6800}"
 
 write_config() {
-    python3 - "$CONFIG" "$FNOS_USER" "$FNOS_PASSWORD" "$SECRET" "$SAVEDIR" "$PORT" <<'PYEOF'
+    python3 - "$CONFIG" "$FNOS_USER" "$FNOS_PASSWORD" "$SECRET" "$SAVEDIR" "$PORT" "$ADMIN_USER" "$ADMIN_PASSWORD" <<'PYEOF'
 import json, os, sys
-path, user, pwd, secret, savedir, port = sys.argv[1:7]
+path, user, pwd, secret, savedir, port, admin_user, admin_pwd = sys.argv[1:9]
 cfg = {
     "port": int(port) if str(port).isdigit() else 6800,
     "secret": secret,
+    "admin_user": admin_user,
+    "admin_password": admin_pwd,
     "fnos_user": user,
     "fnos_password": pwd,
     "fnos_host": "127.0.0.1",
@@ -54,6 +58,8 @@ else
 {
   "port": ${PORT},
   "secret": "${SECRET}",
+  "admin_user": "${ADMIN_USER}",
+  "admin_password": "${ADMIN_PASSWORD}",
   "fnos_user": "${FNOS_USER}",
   "fnos_password": "${FNOS_PASSWORD}",
   "fnos_host": "127.0.0.1",
@@ -65,7 +71,7 @@ EOF
     chmod 600 "${CONFIG}"
 fi
 
-echo "$(date '+%Y-%m-%d %H:%M:%S') - installed, config: ${CONFIG} (user=${FNOS_USER}, savedir=${SAVEDIR:-<下载中心默认>})" >> "${PKGVAR}/main.log"
+echo "$(date '+%Y-%m-%d %H:%M:%S') - installed, config: ${CONFIG} (user=${FNOS_USER}, admin=${ADMIN_USER:-<默认>}, savedir=${SAVEDIR:-<下载中心默认>})" >> "${PKGVAR}/main.log"
 
 # 首次安装即写入最近事件占位
 echo "[]" > "${PKGVAR}/recent.json"

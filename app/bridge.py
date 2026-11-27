@@ -494,6 +494,20 @@ def secret_matches(token):
             and hmac.compare_digest(token.encode("utf-8"), secret.encode("utf-8")))
 
 
+def admin_credentials_ok(username, password):
+    """管理页 HTTP Basic 校验。
+
+    优先用安装向导里用户自设的 admin_user / admin_password；
+    旧配置没有这两项时，回退到「用户名 aria2bridge + RPC Secret」。
+    """
+    user = CFG.get("admin_user")
+    pwd = CFG.get("admin_password")
+    if isinstance(user, str) and user and isinstance(pwd, str) and pwd:
+        return (hmac.compare_digest(str(username).encode("utf-8"), user.encode("utf-8"))
+                and hmac.compare_digest(str(password).encode("utf-8"), pwd.encode("utf-8")))
+    return username == "aria2bridge" and secret_matches(password)
+
+
 def check_token(params):
     """每个 RPC 调用都必须携带正确的首位 token 参数。"""
     if (not params or not isinstance(params[0], str)
@@ -1093,7 +1107,7 @@ class Handler(BaseHTTPRequestHandler):
             decoded = base64.b64decode(encoded, validate=True).decode("utf-8")
             username, separator, password = decoded.partition(":")
             if (scheme.lower() == "basic" and separator and
-                    username == "aria2bridge" and secret_matches(password)):
+                    admin_credentials_ok(username, password)):
                 return True
         except (ValueError, UnicodeError, binascii.Error):
             pass
@@ -1275,14 +1289,7 @@ def main():
     LOG_TRIM_CHECK["at"] = time.time()
 
     here = os.path.dirname(os.path.abspath(__file__))
-    # 按宿主架构选默认随包二进制（cmd/main 正常会显式传 --trim-cli，这里只是源码直跑时的兜底）
-    try:
-        import platform as _platform
-        _m = _platform.machine().lower()
-    except Exception:
-        _m = ""
-    _def_bin = "trim-cli-linux-arm64" if _m in ("aarch64", "arm64") else "trim-cli-linux-x64"
-    TRIM_BIN = args.trim_cli or os.path.join(here, _def_bin)
+    TRIM_BIN = args.trim_cli or os.path.join(here, "trim-cli-linux-x64")
     if not os.path.exists(TRIM_BIN):
         # 本地测试兜底: 同目录或 PATH
         for cand in (os.path.join(here, "trim-cli"), "trim-cli"):

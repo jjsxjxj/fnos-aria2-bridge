@@ -140,6 +140,23 @@ class AuthenticationTests(unittest.TestCase):
         self.assertEqual(self.request('/api/config', secret='测试:secret')[0], 200)
         self.assertIn('result', bridge.dispatch(self.rpc(['token:测试:secret'])))
 
+    def test_custom_admin_credentials_replace_defaults(self):
+        """安装向导里自设的账号密码应取代 aria2bridge + Secret 的旧逻辑。"""
+        bridge.CFG['admin_user'] = '张三'
+        bridge.CFG['admin_password'] = 'p@ss-中文-123'
+
+        def basic(user, pwd):
+            raw = '%s:%s' % (user, pwd)
+            return {'Authorization': 'Basic ' + base64.b64encode(raw.encode('utf-8')).decode()}
+
+        self.assertEqual(self.request('/', headers=basic('张三', 'p@ss-中文-123'))[0], 200)
+        self.assertEqual(self.request('/api/config', headers=basic('张三', 'p@ss-中文-123'))[0], 200)
+        # 旧默认凭据失效
+        self.assertEqual(self.request('/', secret='test-secret')[0], 401)
+        # 用户名/密码任一错误都拒绝
+        self.assertEqual(self.request('/', headers=basic('张三', 'wrong'))[0], 401)
+        self.assertEqual(self.request('/', headers=basic('aria2bridge', 'p@ss-中文-123'))[0], 401)
+
     def test_status_script_data_is_escaped(self):
         bridge.RECENT[0]['detail'] = '</script><script>alert(1)</script>'
         _, _, body = self.request('/', secret='test-secret')

@@ -36,10 +36,9 @@ Aria2 客户端 (DBO / AriaNg / …)
 ## 安装
 
 1. 在飞牛应用中心安装 **「Python 3.12」开发工具**（运行依赖）
-2. 从 [Releases](https://github.com/jjsxjxj/fnos-aria2-bridge/releases/latest) 下载对应架构的包（或见[博客文章](https://813146.xyz/post/fnos-aria2-bridge-download-center)内的网盘渠道）：
-   - x86_64 设备：`aria2bridge_<版本>_x86.fpk`
-   - ARM 设备：`aria2bridge_<版本>_arm64.fpk`
+2. 从 [Releases](https://github.com/jjsxjxj/fnos-aria2-bridge/releases/latest) 下载 `aria2bridge.fpk`（或见[博客文章](https://813146.xyz/post/fnos-aria2-bridge-download-center)内的网盘渠道）
 3. 飞牛应用中心 → 手动安装 → 选择 fpk，按向导填写：
+   - **管理页用户名与密码**（自己设置，用于打开桌面图标后的登录，不是飞牛账号）
    - 飞牛账号（**未开启两步验证**的账号）与密码
    - 服务端口（默认 `6800`）
    - RPC 密钥（Secret，设置独立的非空随机密钥，不要复用飞牛账号密码）
@@ -47,10 +46,11 @@ Aria2 客户端 (DBO / AriaNg / …)
 
 ## 管理页登录与升级
 
-打开桌面图标或 `http://<飞牛IP>:6800/` 时，浏览器会要求登录：用户名为
-`aria2bridge`，密码为安装时填写的 **RPC Secret**，不是飞牛账号密码。
-设置、自检、日志下载继续使用同一登录。修改 Secret 后，浏览器需要使用新密钥重新登录，
-所有 RPC 客户端也要同步更新。
+打开桌面图标或 `http://<飞牛IP>:6800/` 时，浏览器会要求登录：用户名和密码就是安装向导里
+**你自己设置的那一组**（不是飞牛账号密码）。设置、自检、日志下载继续使用同一登录。
+
+如果是从旧版本升级、配置文件里没有这两项，则回退为「用户名 `aria2bridge` + RPC Secret」。
+修改 RPC Secret 后，所有 RPC 客户端要同步更新。
 
 升级旧安装时，请先通过飞牛应用设置配置一个独立的非空随机 Secret，并更换旧安装向导
 曾预填的默认密钥。空密钥配置不再允许匿名访问：管理接口返回 503，RPC 返回认证错误；
@@ -95,13 +95,9 @@ HTTP Basic 与 HTTP RPC 都不会加密传输。仅在受控网络使用，建�
 fnpack build .
 ```
 
-打 ARM 包：把 `manifest` 里的 `platform` 改成 `arm`，并把 **aarch64 版 `trim-cli-linux-arm64`**
-放进 `app/`，再 `fnpack build`。ARM 包不能夹带 x86 版 trim-cli（见下方限制）。
-
-`cmd/main` 按宿主机架构挑 trim-cli：同架构随包二进制 > 系统路径 > `PATH`；系统路径命中时会先
-尝试复制进可写目录（失败不致命，直接用系统路径）。启动前还会执行 `trim-cli login --help` 预检：
-不支持 `-u/-p` 的新版（OAuth-only）和跑不起来的二进制会直接报错退出，不会等到 addUri 阶段
-才莫名失败。不会用 qemu 硬跑异架构二进制。
+`cmd/main` 查找 trim-cli 的顺序是：随包 `app/trim-cli-linux-x64` > 应用目录 > `PATH`。
+启动前会执行 `trim-cli login --help` 预检：不支持 `-u/-p` 的新版（OAuth-only）或跑不起来的
+二进制会直接报错退出，不会等到 addUri 阶段才莫名失败。
 
 包内目录结构：
 
@@ -118,11 +114,10 @@ test/           # 集成测试（mock trim-cli，38 项）
 
 ## 已知限制
 
-- 提供 **x86_64** 与 **ARM64** 两个包，按飞牛设备架构选择
-- **飞牛系统不预装 `trim-cli`**，它由本应用自带：ARM 包内置 aarch64 版，x86 包内置 x64 版
-- trim-cli 有版本谱系差异：**新版删掉了 `-u/-p`（只剩 OAuth），不能用于本应用**；启动时会预检并明确报错。
-  若需自行替换，请放到应用目录并命名为 `trim-cli-linux-arm64`（ARM）或 `trim-cli-linux-x64`（x86），
-  再 `chmod +x` 后重启应用
+- 仅提供 **x86_64** 包
+- **飞牛系统不预装 `trim-cli`**，随包自带 x64 版；如需替换，放到应用目录并命名为
+  `trim-cli-linux-x64`，再 `chmod +x` 后重启应用
+- trim-cli 有版本谱系差异：**新版删掉了 `-u/-p`（只剩 OAuth），不能用于本应用**，启动时会预检并明确报错
 - **不要用 qemu 模拟运行 x86 版 trim-cli**：trim-cli 是 Rust 程序，启动时会读 `/proc/self/maps`，在 qemu 用户态下必然 `SIGSEGV`（`code=MAPERR, addr=0x20`）
 - 飞牛 `task.addUris` 不支持 **ed2k** 链接（http/https/ftp/sftp/magnet 可用）
 - 状态页及管理接口需要认证；仍请勿把 6800 端口直接映射到公网
@@ -134,6 +129,7 @@ test/           # 集成测试（mock trim-cli，38 项）
 
 | 版本 | 要点 |
 |---|---|
+| 1.0.22 | 管理页账号密码改为安装向导中自行设置（不再固定 `aria2bridge` + Secret，旧配置自动回退）；安装向导补充管理页登录说明；许可协议提供中文参考译文；移除 ARM 支持 |
 | 1.0.21 | ARM 包内嵌 aarch64 trim-cli（飞牛系统不预装，之前 ARM 包因此无法启动）；修复「复制失败即弃用可用二进制」的缺陷；启动时校验 trim-cli 是否支持账号密码登录 |
 | 1.0.20 | 修复 ARM 包：移除无效的 qemu 模拟，改用飞牛自带的 aarch64 trim-cli；找不到原生版时明确报错而不是让 qemu 崩溃 |
 | 1.0.19 | **安全修复**：RPC 每次调用强制校验 token、管理接口改用 HTTP Basic、跨源管理请求拒绝、空 Secret 失败关闭、向导不再预填公开密钥；**新增 ARM64 包** |

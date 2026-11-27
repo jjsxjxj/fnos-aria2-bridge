@@ -4,7 +4,35 @@
         "items": [
             {
                 "type": "tips",
-                "helpText": "<b>下载中心接入Aria2</b> — 把飞牛「下载中心」变成一个标准 Aria2 下载器，任何支持 Aria2 的软件都能直接推送任务。<br><br><b>接入方法（通用）：</b>在任意软件的「Aria2 / RPC 设置」里填：<br>· 主机：飞牛主机 IP<br>· 端口：6800（或下方自定义端口）<br>· 密钥：下方设置的 Secret<br><br>打开桌面图标可随时查看接入参数、自检连通性和最近推送记录。"
+                "helpText": "<b>下载中心接入Aria2</b> — 把飞牛「下载中心」变成一个标准 Aria2 下载器，任何支持 Aria2 的软件都能直接推送任务。<br><br><b>接入方法（通用）：</b>在任意软件的「Aria2 / RPC 设置」里填：<br>· 主机：飞牛主机 IP<br>· 端口：6800（或下方自定义端口）<br>· 密钥：下方设置的 Secret<br><br>打开桌面图标可随时查看接入参数、自检连通性和最近推送记录。<br><br><b>管理页登录：</b>打开桌面图标后浏览器会要求登录，用户名和密码由你<b>在下面自行设置</b>（不是飞牛账号密码，也和管理页里改 RPC 密钥互不影响）。请记牢，忘记后需重装或手动改配置。"
+            },
+            {
+                "type": "text",
+                "field": "wizard_admin_user",
+                "label": "管理页登录用户名（自己设置）",
+                "initValue": "admin",
+                "rules": [
+                    {
+                        "required": true,
+                        "message": "请设置管理页用户名"
+                    }
+                ]
+            },
+            {
+                "type": "password",
+                "field": "wizard_admin_password",
+                "label": "管理页登录密码（自己设置，至少 6 位）",
+                "initValue": "",
+                "rules": [
+                    {
+                        "required": true,
+                        "message": "请设置管理页密码"
+                    },
+                    {
+                        "pattern": "^.{6,}$",
+                        "message": "密码至少 6 位"
+                    }
+                ]
             },
             {
                 "type": "text",
@@ -49,12 +77,12 @@
             {
                 "type": "text",
                 "field": "wizard_secret",
-                "label": "Aria2 RPC 密钥（Secret，填写到 DBO 的 Aria2 设置里）",
+                "label": "管理登录密码 / Aria2 RPC 密钥（同一个值，请自行填写随机串）",
                 "initValue": "",
                 "rules": [
                     {
                         "required": true,
-                        "message": "请设置 Aria2 密钥"
+                        "message": "请设置一个非空的随机密钥（管理页登录密码也是它）"
                     }
                 ]
             },

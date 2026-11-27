@@ -14,15 +14,17 @@ for cand in /var/apps/python312/target/bin/python3.12 /usr/local/bin/python3.12 
 done
 [ -n "$PY" ] || exit 0
 
-"$PY" - "$CONFIG" "${wizard_fnos_user:-}" "${wizard_fnos_password:-}" "${wizard_secret:-}" "${wizard_savedir:-}" "${wizard_port:-}" <<'PYEOF'
+"$PY" - "$CONFIG" "${wizard_fnos_user:-}" "${wizard_fnos_password:-}" "${wizard_secret:-}" "${wizard_savedir:-}" "${wizard_port:-}" "${wizard_admin_user:-}" "${wizard_admin_password:-}" <<'PYEOF'
 import json, os, sys
-path, user, pwd, secret, savedir, port = sys.argv[1:7]
+path, user, pwd, secret, savedir, port, admin_user, admin_pwd = sys.argv[1:9]
 cfg = json.load(open(path, encoding="utf-8"))
 if user: cfg["fnos_user"] = user
 if pwd: cfg["fnos_password"] = pwd
 if secret: cfg["secret"] = secret
 if savedir: cfg["default_save_dir"] = savedir
 if str(port).isdigit(): cfg["port"] = int(port)
+if admin_user: cfg["admin_user"] = admin_user
+if admin_pwd: cfg["admin_password"] = admin_pwd
 with open(path, "w", encoding="utf-8") as f:
     json.dump(cfg, f, ensure_ascii=False, indent=2)
 os.chmod(path, 0o600)
